@@ -119,10 +119,11 @@ sub new {
 
 sub _init {
 	my $self = shift;
-	my $ship_file = shift;
-	my $socket = shift;
-	my $color = shift;
+	my $startLevel = shift;
 
+    if ($startLevel) {
+        $self->{startLevel} = $startLevel;
+    }
 	$self->{'regex'} = '';
 	$self->{msgs} = ();
 	$self->{chatWidth} = 60;
@@ -201,7 +202,6 @@ sub _init {
         },
     ];
 
-	$self->{zoom} = 1;
 	$self->resizeScr();
 
     ### curses init
@@ -400,7 +400,7 @@ sub loop {
 	$self->setHandlers();
 	$self->printBorder();
 
-    $self->_resetLighting($self->{width} * $self->{zoom}, $self->{height} * $self->{zoom});
+    $self->_resetLighting($self->{width}, $self->{height});
 
 	my $playing = 1;
 	while ($playing){
@@ -421,9 +421,15 @@ sub loop {
 			$frames = 0;
 			$self->{lastFrame} = $time;
 		}
-		$self->{'map'} = $self->_resetMap($self->{width} * $self->{zoom}, $self->{height} * $self->{zoom});
+		$self->{'map'} = $self->_resetMap($self->{width}, $self->{height});
 
-		$self->_resetLighting($self->{width} * $self->{zoom}, $self->{height} * $self->{zoom});
+        if ($self->{mode} eq 'playing') {
+            $self->{power} += (1 / $self->{fps});
+            if ($self->{power} > $self->{powerMax}) {
+                $self->{power} = $self->{powerMax};
+            }
+        }
+		$self->_resetLighting($self->{width}, $self->{height});
 
         if ($self->{mode} eq 'waitingToBegin') {
             my $msg = '/press enter to begin/';
@@ -470,13 +476,13 @@ sub loop {
             'WHITE',
             'BLACK',
         );
-        $self->putMapStr(
-            1,
-            1,
-            "level $self->{level}: " . (int  $timeElapsed),
-            'WHITE',
-            'BLACK',
-        );
+        #$self->putMapStr(
+            #1,
+            #1,
+            #"level $self->{level}: " . (int  $timeElapsed),
+            #'WHITE',
+            #'BLACK',
+        #);
 
         if ($self->{mode} eq 'playing') {
             my $words = $self->{levels}->[$self->{level}]->{words};
@@ -497,7 +503,7 @@ sub loop {
         $self->printInfo();
         $self->printScreen($scr);
 		$self->printSide();
-	    $self->_resetLighting($self->{width} * $self->{zoom}, $self->{height} * $self->{zoom});
+	    $self->_resetLighting($self->{width}, $self->{height});
 	}
 }
 
@@ -549,10 +555,10 @@ sub printScreen {
 
 	### draw the screen to Term::Screen
 	foreach my $i (0 .. $self->{height}){
-		my $iZ = (int($i * $self->{zoom}));
+		my $iZ = (int($i));
 		my $row = '';
 		foreach (0 .. $self->{width}){
-			my $jZ = (int($_ * $self->{zoom}));
+			my $jZ = (int($_));
 			my $lighting = $lighting[$iZ]->[$jZ];
 			my $color = getColor('', 'ON_GREY' . ($lighting <= 23 ? $lighting : 23 ));
             $row .= (defined($map->[$iZ]->[$jZ]) ? $color . $map->[$iZ]->[$jZ] : $color . $self->getStar($i, $_));
@@ -589,11 +595,7 @@ sub putTermChr {
 sub putStr {
     if ($useCurses){
         my $self = shift;
-        if ($self->{zoom} == 1){
-            return putCursesChr($self->{_curses_map}, @_);
-        } else {
-            return putCursesChr($self->{_curses_map}, $_[0] / $self->{zoom}, $_[1] / $self->{zoom}, $_[2], $_[3], $_[4]);
-        }
+        return putCursesChr($self->{_curses_map}, @_);
     } else {
         return putTermChr(@_);
     }
@@ -717,6 +719,9 @@ sub printInfo {
 		0
 	);
 
+    my $levelName = $self->{levels}->[$self->{level}]->{name};
+    $self->putInfoStr(3, 1, "                                        ");
+    $self->putInfoStr(3, 1, $levelName);
     ### debug info
     #$self->putInfoStr(0, 100, "debug: $self->{debug}  ", 'GREEN', "ON_BLACK");
     #$self->putInfoStr(10, 100, "debug: $self->{ship}->{debug}  ", 'GREEN', "ON_BLACK");
@@ -958,7 +963,7 @@ sub inputRegex {
 
     return 0 if $regex eq '';
 
-    my $powerUsed = length($regex) + 10;
+    my $powerUsed = (length($regex) * 2) + 25;
     if ($powerUsed > $self->{power}) {
         my $bell = chr(7);
         print $bell;
@@ -1135,6 +1140,11 @@ sub _drawWords {
         }
         $posY += $len;
         $posY += 3;
+        if ($posY + $len - $shiftRight > $self->{width} - 10) {
+            $posY = 3;
+            $posY += $shiftRight;
+            $posX += 3;
+        }
     }
 }
 
@@ -1162,7 +1172,7 @@ sub _getKeystrokes {
             my $chr = $scr->getch();
             if ($self->{mode} eq 'waitingToBegin') {
                 if ($chr eq "\r"){
-                    $self->{level} = 1;
+                    $self->{level} = $self->{startLevel} // 1;
                     $self->{mode} = 'playing';
                     $self->beginLevel();
                 }
@@ -1275,11 +1285,7 @@ sub addLighting {
     if ($newLevel < 23){
 	    $lighting[$x]->[$y] = $newLevel;
 		if ($useCurses){
-            if ($self->{zoom} == 1){
-			    putCursesChr($self->{_curses_map}, $x, $y, ' ', 'WHITE', 'ON_GREY' . $newLevel);
-            } else {
-			    putCursesChr($self->{_curses_map}, $x / $self->{zoom}, $y / $self->{zoom}, ' ', 'WHITE', 'ON_GREY' . $newLevel);
-            }
+            putCursesChr($self->{_curses_map}, $x, $y, ' ', 'WHITE', 'ON_GREY' . $newLevel);
 		}
     }
 }
@@ -1287,7 +1293,7 @@ sub addLighting {
 sub onMap {
 	my $self = shift;
 	my ($x, $y) = @_;
-	return ($x > 0 && $y > 0 && $x < ($self->{height} - 2) * $self->{zoom} && $y < ($self->{width} - 2) * $self->{zoom});
+	return ($x > 0 && $y > 0 && $x < ($self->{height} - 2) && $y < ($self->{width} - 2));
 }
 
 1;
